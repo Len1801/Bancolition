@@ -1,63 +1,55 @@
-const mysql = require("mysql");
+const mysql = require("mysql2");
 let pool;
 const ERROR_CODE = 500;
 
 const getPool = () => {
-  if (pool) {
-    console.log("Ya hay una conexión, esto es singleton :)");
-    return pool;
-  }
+  if (pool) return pool;
 
   pool = mysql.createPool({
     connectionLimit: 10,
     host: process.env.DB_HOST,
     database: process.env.DB_SCHEMA,
     user: process.env.DB_USER,
-    password: process.env.DB_PASS
+    password: process.env.DB_PASS,
   });
   return pool;
 };
 
 const errorResponse = (error, response) => {
-  console.log(`--ERROR| ${error} |FIN ERROR--`);
-  response.status(ERROR_CODE).send({
+  response.status(ERROR_CODE).json({
     cod: ERROR_CODE,
-    msg: error,
+    msg: "Error interno del servidor",
   });
 };
 
-const excuteSP = (sql, response, callback) => {
-  try {
-    getPool().getConnection((err, connection) => {
-      if (err) {
-        try {
-          console.log(`Connection error: ${err.sqlMessage}`);
-          connection.release();
-          return errorResponse(err.sqlMessage, response);
-        } catch (error) {
-          return errorResponse(err.sqlMessage, response);
-        }
-      }
+const excuteSP = (sql, params, response, callback) => {
+  getPool().getConnection((err, connection) => {
+    if (err) {
+      return errorResponse(err.sqlMessage || err.message, response);
+    }
 
-      connection.query(sql, (err, rows) => {
-        if (err) {
-          console.log(`Error executing the SP: ${err.sqlMessage}`);
-          try {
-            console.log(`Connection error: ${err.sqlMessage}`);
-            connection.release();
-            return errorResponse(err.sqlMessage, response);
-          } catch (error) {
-            return errorResponse(err.sqlMessage, response);
-          }
-        }
-        callback(rows[0]);
-        console.log(`Response = ${JSON.stringify(rows[0])}`);
-      });
+    connection.query(sql, params, (err, rows) => {
       connection.release();
+      if (err) {
+        return errorResponse(err.sqlMessage || err.message, response);
+      }
+      callback(rows[0]);
     });
-  } catch (error) {
-    return errorResponse(error, response);
-  }
+  });
+};
+
+const excuteSPAsync = (sql, params) => {
+  return new Promise((resolve, reject) => {
+    getPool().getConnection((err, connection) => {
+      if (err) return reject(err);
+      connection.query(sql, params, (err, rows) => {
+        connection.release();
+        if (err) return reject(err);
+        resolve(rows[0]);
+      });
+    });
+  });
 };
 
 module.exports = excuteSP;
+module.exports.async = excuteSPAsync;
